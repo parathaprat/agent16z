@@ -1,0 +1,23 @@
+dataset_root: "dataset"
+headless: false
+slow_mo: 300
+# Use persistent browser context to save login state
+# Set to true to save login sessions between runs
+persistent_context: true
+persistent_context_dir: ".browser_context"
+llm:
+  provider: "groq"  # Options: "groq" (free & fast!), "huggingface", "none"
+  model: "llama-3.1-8b-instant"  # Free Groq model (fast!)
+  # Other free Groq models: "llama-3.1-70b-versatile", "mixtral-8x7b-32768"
+  temperature: 0.2
+  api_base: "https://api.groq.com/openai/v1"  # Groq API (OpenAI-compatible)
+common_button_text:
+  - "Create"
+  - "New"
+  - "Add"
+  - "Save"
+  - "Submit"
+  - "Sign in"
+  - "Log in"
+  - "Continue with Google"
+
