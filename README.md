@@ -5,13 +5,22 @@ An AI-driven UI workflow capture agent that takes natural language requests and 
 ## Overview
 
 Softlight Agent ("Agent B") is designed to:
-- Take natural-language requests like "Create a project in Linear" or "Search for videos on YouTube"
+- Take natural-language requests like "Create a project in Linear" or "Create a repository on GitHub"
 - Use an LLM to plan generic UI actions dynamically (no hardcoding)
 - Execute those actions in a real browser via Playwright
 - Detect when the UI changes (even if the URL doesn't) and capture screenshots of each state
 - Save screenshots + JSON metadata under `dataset/<task_slug>/`
 
 The system is **completely generalizable** across web apps and doesn't rely on hard-coded workflows.
+
+## Supported Tasks
+
+The system has been tested and works with 4 different tasks across 3 different web applications:
+
+1. **Create a project in Linear** - Demonstrates modal detection, form filling, and context-aware button detection
+2. **Create an issue in Linear** - Shows consistency across different sections of the same app
+3. **Search on YouTube** - Demonstrates search box handling and automatic Enter key press
+4. **Create a repository on GitHub** - Shows sidebar navigation, form filling, and scrolling to find buttons below the fold
 
 ## Key Features
 
@@ -75,6 +84,9 @@ python main.py "create an issue in Linear called Bug Fix"
 
 # Search on YouTube
 python main.py "Go to youtube and search for a funny video"
+
+# Create a repository on GitHub
+python main.py "Create a new repository on github named test"
 ```
 
 ## Output
@@ -128,6 +140,15 @@ Edit `config.yaml` to customize behavior:
 2. **Execution**: Playwright executes each action sequentially in a Chromium browser
 3. **State Detection**: After each action, the DOM is hashed and compared to detect changes
 4. **Capture**: When a change is detected, a full-page screenshot and metadata are saved
+
+## Key Technical Features
+
+- **Context-Aware Page Analysis**: Dynamically analyzes page structure to find buttons, forms, and navigation without hardcoding
+- **Modal Detection**: Automatically detects and prioritizes buttons inside modals
+- **Header Button Filtering**: Skips header/nav buttons (like search bars) to find form buttons
+- **Scrolling Support**: Automatically scrolls to find buttons below the fold
+- **Search Box Handling**: Detects search boxes and presses Enter instead of looking for non-existent buttons
+- **Login State Management**: Detects login requirements and saves session state between runs
 
 ## Requirements
 

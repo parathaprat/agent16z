@@ -3,7 +3,7 @@ Executor module for running UI actions via Playwright.
 """
 import os
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from playwright.sync_api import sync_playwright, Browser, Page, BrowserContext
 
 from actions import execute_action, detect_auth_state
@@ -33,6 +33,8 @@ class Executor:
         self.context: BrowserContext = None
         self.page: Page = None
         self.playwright = None
+        self.task_description: Optional[str] = None
+        self._login_completed: bool = False
     
     def __enter__(self):
         """Context manager entry."""
@@ -110,7 +112,9 @@ class Executor:
             print(f"\n[{i}/{len(actions)}] {action_type}")
             
             # Execute the action (pass task context for smart button detection)
-            result = execute_action(self.page, action, self.config, task_context=task_description)
+            # Skip auth check if login was completed manually
+            skip_auth = getattr(self, '_login_completed', False)
+            result = execute_action(self.page, action, self.config, task_context=task_description, skip_auth_check=skip_auth)
             results.append(result)
             
             # Check for login requirement AFTER goto action
@@ -176,13 +180,15 @@ class Executor:
                     
                     # Re-check auth state
                     auth_state = detect_auth_state(self.page)
-                    if auth_state.get("requires_login", False):
-                        print("  ⚠️  Still appears to require login. Continuing anyway...")
-                    else:
-                        print("  ✓ Login detected! Continuing with task...")
+                    # After manual login, trust the user and continue
+                    # Don't block actions even if some login indicators remain
+                    print("  ✓ Login completed. Continuing with task...")
                     
                     # Re-capture state after login
                     self.state_manager.capture_if_changed(self.page, "after-login", force=True)
+                    
+                    # Mark that we've completed login - don't check again for this session
+                    self._login_completed = True
             
             # Print action result
             if result.get("success"):

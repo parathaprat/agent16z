@@ -109,9 +109,16 @@ def detect_auth_state(page: Page) -> Dict[str, Any]:
         except:
             pass
     
-    # Check if we're on a dedicated login page OR if login button is visible
-    is_login_page = is_login_url or (login_text_found and (has_email_field or has_password_field))
-    requires_login = is_login_page or has_login_button
+    # Check if we're on a dedicated login page
+    # Be more conservative: only mark as login page if:
+    # 1. URL explicitly indicates login, OR
+    # 2. We have BOTH email AND password fields visible (actual login form), OR
+    # 3. We have a login form with email/password AND we're on a root/auth URL
+    has_login_form = has_email_field and has_password_field
+    is_login_page = is_login_url or (has_login_form and (is_login_url or "/login" in url or "/signin" in url))
+    
+    # requires_login is true if we need login (but might already be logged in)
+    requires_login = is_login_page or (has_login_button and not has_login_form)
     
     return {
         "is_login_page": is_login_page,
@@ -145,7 +152,7 @@ def goto(page: Page, url: str, timeout: int = 30000) -> Dict[str, Any]:
         return {"success": False, "action": "goto", "error": str(e)}
 
 
-def click_by_text(page: Page, text: str, timeout: int = 10000, task_context: str = None) -> Dict[str, Any]:
+def click_by_text(page: Page, text: str, timeout: int = 10000, task_context: str = None, skip_auth_check: bool = False) -> Dict[str, Any]:
     """
     Click an element by its visible text.
     Uses page analyzer for context-aware navigation detection.
@@ -155,20 +162,24 @@ def click_by_text(page: Page, text: str, timeout: int = 10000, task_context: str
         text: Text to search for
         timeout: Wait timeout in milliseconds
         task_context: Optional task description for context-aware matching
+        skip_auth_check: If True, skip login page check (useful after manual login)
         
     Returns:
         Result dictionary with success status
     """
     try:
-        # Check if we're on a login page
-        auth_state = detect_auth_state(page)
-        if auth_state["is_login_page"]:
-            return {
-                "success": False,
-                "action": "click_by_text",
-                "error": f"Element with text '{text}' not found - appears to be on login/authentication page",
-                "auth_state": auth_state
-            }
+        # Check if we're on a login page (only if not skipping auth check)
+        if not skip_auth_check:
+            auth_state = detect_auth_state(page)
+            # Only block if we're actually on a dedicated login page (URL-based)
+            # Don't block just because login-related text exists (might be after login)
+            if auth_state["is_login_page"] and ("/login" in page.url.lower() or "/signin" in page.url.lower() or "/auth" in page.url.lower()):
+                return {
+                    "success": False,
+                    "action": "click_by_text",
+                    "error": f"Element with text '{text}' not found - appears to be on login/authentication page",
+                    "auth_state": auth_state
+                }
         
         # Try context-aware navigation matching first
         if task_context and text.lower() in ["projects", "issues", "tasks", "pages", "documents"]:
@@ -177,16 +188,97 @@ def click_by_text(page: Page, text: str, timeout: int = 10000, task_context: str
                 try:
                     nav_elem = page.get_by_text(matching_nav["text"], exact=False).first
                     nav_elem.wait_for(state="visible", timeout=timeout)
+                    nav_elem.scroll_into_view_if_needed()
                     nav_elem.click()
                     return {"success": True, "action": "click_by_text", "text": matching_nav["text"], "method": "context-aware"}
                 except:
                     pass
         
-        # Standard text matching
-        element = page.get_by_text(text, exact=False).first
-        element.wait_for(state="visible", timeout=timeout)
-        element.click()
-        return {"success": True, "action": "click_by_text", "text": text}
+        # Try multiple strategies to find the element
+        # Strategy 1: Standard text matching (most common)
+        try:
+            element = page.get_by_text(text, exact=False).first
+            element.wait_for(state="visible", timeout=timeout)
+            element.scroll_into_view_if_needed()
+            page.wait_for_timeout(300)  # Wait after scroll
+            element.click()
+            return {"success": True, "action": "click_by_text", "text": text, "method": "text-match"}
+        except:
+            pass
+        
+        # Strategy 2: Try by role (button, link)
+        try:
+            element = page.get_by_role("button", name=text, exact=False).first
+            element.wait_for(state="visible", timeout=timeout)
+            element.scroll_into_view_if_needed()
+            page.wait_for_timeout(300)
+            element.click()
+            return {"success": True, "action": "click_by_text", "text": text, "method": "role-button"}
+        except:
+            pass
+        
+        # Strategy 3: Try by link role
+        try:
+            element = page.get_by_role("link", name=text, exact=False).first
+            element.wait_for(state="visible", timeout=timeout)
+            element.scroll_into_view_if_needed()
+            page.wait_for_timeout(300)
+            element.click()
+            return {"success": True, "action": "click_by_text", "text": text, "method": "role-link"}
+        except:
+            pass
+        
+        # Strategy 4: Try finding in sidebar/nav areas (for GitHub, Linear, etc.)
+        try:
+            # Look for sidebar/nav containers
+            sidebar_selectors = [
+                'nav',
+                'aside',
+                '[role="navigation"]',
+                '[class*="sidebar" i]',
+                '[class*="nav" i]',
+                '[class*="menu" i]'
+            ]
+            
+            for sidebar_selector in sidebar_selectors:
+                try:
+                    sidebar = page.locator(sidebar_selector).first
+                    if sidebar.is_visible(timeout=1000):
+                        # Look for text in sidebar
+                        element = sidebar.get_by_text(text, exact=False).first
+                        if element.is_visible(timeout=timeout):
+                            element.scroll_into_view_if_needed()
+                            page.wait_for_timeout(300)
+                            element.click()
+                            return {"success": True, "action": "click_by_text", "text": text, "method": "sidebar"}
+                except:
+                    continue
+        except:
+            pass
+        
+        # Strategy 5: Try partial text match (for "New repository" when looking for "New")
+        if len(text.split()) == 1:  # Single word
+            try:
+                # Find all clickable elements and check if text contains our search term
+                all_clickables = page.locator('button, a, [role="button"], [role="link"]')
+                count = all_clickables.count()
+                for i in range(min(count, 50)):
+                    try:
+                        elem = all_clickables.nth(i)
+                        if elem.is_visible(timeout=500):
+                            elem_text = elem.text_content() or ""
+                            if text.lower() in elem_text.lower() and len(elem_text.strip()) > 0:
+                                elem.scroll_into_view_if_needed()
+                                page.wait_for_timeout(300)
+                                elem.click()
+                                return {"success": True, "action": "click_by_text", "text": elem_text.strip(), "method": "partial-match"}
+                    except:
+                        continue
+            except:
+                pass
+        
+        # If all strategies fail, raise the original error
+        raise PlaywrightTimeoutError(f"Element with text '{text}' not found")
     except PlaywrightTimeoutError:
         # Check auth state on timeout
         auth_state = detect_auth_state(page)
@@ -567,6 +659,44 @@ def click_submit(page: Page, button_texts: list = None, task_context: str = None
     # Wait a bit for page/modal to settle
     page.wait_for_timeout(1000)
     
+    # Strategy 0.5: Special handling for "Create" buttons - look for buttons with "Create" text
+    # This is specifically for cases like "Create Repository" where we need to find the button
+    # and skip header buttons (like search bars)
+    if task_context and ("create" in task_context.lower() or "repository" in task_context.lower()):
+        try:
+            # Look for all buttons and filter by text containing "Create"
+            all_buttons = page.locator('button, [role="button"], input[type="submit"]')
+            count = all_buttons.count()
+            for i in range(min(count, 50)):
+                try:
+                    button = all_buttons.nth(i)
+                    if button.is_visible(timeout=1000):
+                        button_text = button.text_content() or ""
+                        
+                        # Skip if button is in header/nav/search
+                        try:
+                            in_header = (
+                                button.locator('xpath=ancestor::header | ancestor::nav | ancestor::*[contains(@class, "header") i] | ancestor::*[contains(@class, "nav") i] | ancestor::*[role="banner"]').count() > 0 or
+                                button.locator('xpath=ancestor::*[contains(@class, "search") i]').count() > 0
+                            )
+                            if in_header:
+                                continue  # Skip header buttons
+                        except:
+                            pass
+                        
+                        # Check if button text contains "Create" and is relevant
+                        if "create" in button_text.lower() and len(button_text.strip()) > 0:
+                            # Scroll into view (this will scroll to find buttons below the fold)
+                            button.scroll_into_view_if_needed()
+                            page.wait_for_timeout(500)
+                            if button.is_visible(timeout=1000):
+                                button.click()
+                                return {"success": True, "action": "click_submit", "button": button_text.strip(), "method": "create-specific"}
+                except:
+                    continue
+        except:
+            pass
+    
     # Strategy 1: Use page analyzer to find matching button (completely context-aware)
     # This now prioritizes buttons in modals
     if task_context:
@@ -604,32 +734,113 @@ def click_submit(page: Page, button_texts: list = None, task_context: str = None
                 try:
                     button = strategy()
                     if button.is_visible(timeout=2000):
+                        # Scroll into view and wait for it to be stable
                         button.scroll_into_view_if_needed()
-                        page.wait_for_timeout(300)
-                        button.click()
-                        # Clicked button successfully
-                        return {"success": True, "action": "click_submit", "button": button_text, "method": "context-aware"}
+                        page.wait_for_timeout(500)  # Wait longer after scroll
+                        # Check if button is still visible and clickable after scroll
+                        if button.is_visible(timeout=1000):
+                            button.click()
+                            # Clicked button successfully
+                            return {"success": True, "action": "click_submit", "button": button_text, "method": "context-aware"}
                 except Exception as e:
                     continue
     
     # Strategy 2: Try exact and partial matches from button_texts
+    # Prioritize buttons in forms/containers (not in header/nav)
     for text in button_texts:
         try:
-            # Try exact match first
+            # First, try to find button in form/main content area (not header)
+            # This avoids clicking search bars or header buttons
+            try:
+                # Look for buttons in forms, main content, or modals first
+                # Exclude header/nav areas explicitly
+                form_button = page.locator('form button, main button, [role="main"] button, [class*="form" i] button, [class*="content" i] button').filter(has_text=text).filter(has_not=page.locator('header, nav, [role="banner"], [class*="header" i], [class*="nav" i]')).first
+                if form_button.is_visible(timeout=2000):
+                    form_button.scroll_into_view_if_needed()
+                    page.wait_for_timeout(500)
+                    if form_button.is_visible(timeout=1000):
+                        form_button.click()
+                        return {"success": True, "action": "click_submit", "button": text, "method": "form-context"}
+            except:
+                pass
+            
+            # Try to find all buttons with this text and filter out header ones
+            try:
+                all_buttons = page.locator(f'button:has-text("{text}"), [role="button"]:has-text("{text}")')
+                count = all_buttons.count()
+                for i in range(count):
+                    try:
+                        button = all_buttons.nth(i)
+                        if button.is_visible(timeout=1000):
+                            # Check if button is in header/nav - if so, skip it
+                            try:
+                                # More aggressive check for header/nav
+                                in_header = (
+                                    button.locator('xpath=ancestor::header | ancestor::nav | ancestor::*[contains(@class, "header") i] | ancestor::*[contains(@class, "nav") i] | ancestor::*[role="banner"]').count() > 0 or
+                                    button.locator('xpath=ancestor::*[contains(@class, "search") i]').count() > 0
+                                )
+                                if in_header:
+                                    continue  # Skip header buttons (like search)
+                            except:
+                                pass
+                            
+                            # This button is not in header - scroll to it and click
+                            button.scroll_into_view_if_needed()
+                            page.wait_for_timeout(500)
+                            if button.is_visible(timeout=1000):
+                                button.click()
+                                return {"success": True, "action": "click_submit", "button": text, "method": "filtered-match"}
+                    except:
+                        continue
+            except:
+                pass
+            
+            # Try exact match first (but skip if in header)
             button = page.get_by_role("button", name=text, exact=True).first
             try:
                 button.wait_for(state="visible", timeout=2000)
-                button.click()
-                return {"success": True, "action": "click_submit", "button": text}
+                # Check if button is in a form/main area (not header/nav)
+                # Skip if it's in header/nav (likely search bar)
+                try:
+                    # More aggressive check for header/nav
+                    in_header = (
+                        button.locator('xpath=ancestor::header | ancestor::nav | ancestor::*[contains(@class, "header") i] | ancestor::*[contains(@class, "nav") i] | ancestor::*[role="banner"]').count() > 0 or
+                        button.locator('xpath=ancestor::*[contains(@class, "search") i]').count() > 0
+                    )
+                    if in_header:
+                        continue  # Skip header buttons (like search)
+                except:
+                    pass
+                
+                button.scroll_into_view_if_needed()
+                page.wait_for_timeout(500)
+                if button.is_visible(timeout=1000):
+                    button.click()
+                    return {"success": True, "action": "click_submit", "button": text}
             except PlaywrightTimeoutError:
                 pass
             
-            # Try partial match (case-insensitive)
+            # Try partial match (case-insensitive) - but skip header
             button = page.get_by_role("button", name=text, exact=False).first
             try:
                 button.wait_for(state="visible", timeout=2000)
-                button.click()
-                return {"success": True, "action": "click_submit", "button": text}
+                # Check if button is in header/nav - if so, skip it
+                try:
+                    # More aggressive check for header/nav
+                    in_header = (
+                        button.locator('xpath=ancestor::header | ancestor::nav | ancestor::*[contains(@class, "header") i] | ancestor::*[contains(@class, "nav") i] | ancestor::*[role="banner"]').count() > 0 or
+                        button.locator('xpath=ancestor::*[contains(@class, "search") i]').count() > 0
+                    )
+                    if in_header:
+                        continue  # Skip header buttons
+                except:
+                    pass
+                
+                button.scroll_into_view_if_needed()
+                page.wait_for_timeout(500)
+                if button.is_visible(timeout=1000):
+                    button.click()
+                    return {"success": True, "action": "click_submit", "button": text}
             except PlaywrightTimeoutError:
                 pass
         except Exception:
@@ -683,11 +894,14 @@ def click_submit(page: Page, button_texts: list = None, task_context: str = None
                                         if any(cancel in button_text.lower() for cancel in ["cancel", "close", "dismiss", "×"]):
                                             continue
                                         if len(button_text.strip()) > 0:
+                                            # Scroll into view and ensure it's clickable
                                             button.scroll_into_view_if_needed()
-                                            page.wait_for_timeout(300)
-                                            button.click()
-                                            # Clicked button in modal
-                                            return {"success": True, "action": "click_submit", "button": button_text.strip(), "method": "modal-keyword"}
+                                            page.wait_for_timeout(500)  # Wait longer after scroll
+                                            # Verify button is still visible after scroll
+                                            if button.is_visible(timeout=1000):
+                                                button.click()
+                                                # Clicked button in modal
+                                                return {"success": True, "action": "click_submit", "button": button_text.strip(), "method": "modal-keyword"}
                                 except:
                                     continue
                         except:
@@ -709,11 +923,14 @@ def click_submit(page: Page, button_texts: list = None, task_context: str = None
                             if any(cancel in button_text.lower() for cancel in ["cancel", "close", "dismiss", "×", "back"]):
                                 continue
                             if len(button_text.strip()) > 0:
+                                # Scroll into view and ensure it's clickable
                                 button.scroll_into_view_if_needed()
-                                page.wait_for_timeout(300)
-                                button.click()
-                                # Clicked first non-cancel button in modal
-                                return {"success": True, "action": "click_submit", "button": button_text.strip(), "method": "modal-fallback"}
+                                page.wait_for_timeout(500)  # Wait longer after scroll
+                                # Verify button is still visible after scroll
+                                if button.is_visible(timeout=1000):
+                                    button.click()
+                                    # Clicked first non-cancel button in modal
+                                    return {"success": True, "action": "click_submit", "button": button_text.strip(), "method": "modal-fallback"}
                     except:
                         continue
             except:
@@ -722,13 +939,48 @@ def click_submit(page: Page, button_texts: list = None, task_context: str = None
         pass
     
     # Strategy 4: Find buttons that contain keywords (flexible matching) - page-wide search
+    # But prioritize buttons NOT in header/nav
     keyword_texts = ["Create", "Save", "Submit", "Confirm", "Add", "New"]
     for keyword in keyword_texts:
         try:
             # Find all buttons and filter by text containing keyword
             buttons = page.locator('button, input[type="button"], input[type="submit"], a[role="button"]')
             count = buttons.count()
+            
+            # First pass: Find buttons NOT in header/nav
             for i in range(min(count, 50)):  # Limit to avoid performance issues
+                try:
+                    button = buttons.nth(i)
+                    if button.is_visible(timeout=500):
+                        # Check if button is in header/nav - if so, skip it
+                        try:
+                            in_header = (
+                                button.locator('xpath=ancestor::header | ancestor::nav | ancestor::*[contains(@class, "header") i] | ancestor::*[contains(@class, "nav") i] | ancestor::*[role="banner"]').count() > 0 or
+                                button.locator('xpath=ancestor::*[contains(@class, "search") i]').count() > 0
+                            )
+                            if in_header:
+                                continue  # Skip header buttons
+                        except:
+                            pass
+                        
+                        button_text = button.text_content() or ""
+                        # Skip cancel/close buttons
+                        if any(cancel in button_text.lower() for cancel in ["cancel", "close", "dismiss", "×"]):
+                            continue
+                        if keyword.lower() in button_text.lower() and len(button_text.strip()) > 0:
+                            # Scroll into view and ensure it's clickable
+                            button.scroll_into_view_if_needed()
+                            page.wait_for_timeout(500)  # Wait longer after scroll
+                            # Verify button is still visible after scroll
+                            if button.is_visible(timeout=1000):
+                                button.click()
+                                # Clicked button with keyword match (not in header)
+                                return {"success": True, "action": "click_submit", "button": button_text.strip(), "method": "keyword-match"}
+                except:
+                    continue
+            
+            # Second pass: If no non-header button found, try all buttons (fallback)
+            for i in range(min(count, 50)):
                 try:
                     button = buttons.nth(i)
                     if button.is_visible(timeout=500):
@@ -737,11 +989,12 @@ def click_submit(page: Page, button_texts: list = None, task_context: str = None
                         if any(cancel in button_text.lower() for cancel in ["cancel", "close", "dismiss", "×"]):
                             continue
                         if keyword.lower() in button_text.lower() and len(button_text.strip()) > 0:
+                            # Scroll into view and ensure it's clickable
                             button.scroll_into_view_if_needed()
-                            page.wait_for_timeout(300)
-                            button.click()
-                            # Clicked button with keyword match
-                            return {"success": True, "action": "click_submit", "button": button_text.strip(), "method": "keyword-match"}
+                            page.wait_for_timeout(500)
+                            if button.is_visible(timeout=1000):
+                                button.click()
+                                return {"success": True, "action": "click_submit", "button": button_text.strip(), "method": "keyword-match-fallback"}
                 except:
                     continue
         except:
@@ -752,10 +1005,12 @@ def click_submit(page: Page, button_texts: list = None, task_context: str = None
         submit_button = page.locator('input[type="submit"], button[type="submit"]').first
         if submit_button.is_visible(timeout=2000):
             submit_button.scroll_into_view_if_needed()
-            page.wait_for_timeout(300)
-            submit_button.click()
-            # Clicked submit button by type
-            return {"success": True, "action": "click_submit", "button": "submit button", "method": "submit-type"}
+            page.wait_for_timeout(500)  # Wait longer after scroll
+            # Verify button is still visible after scroll
+            if submit_button.is_visible(timeout=1000):
+                submit_button.click()
+                # Clicked submit button by type
+                return {"success": True, "action": "click_submit", "button": "submit button", "method": "submit-type"}
     except:
         pass
     
@@ -792,7 +1047,7 @@ def capture_state(page: Page) -> Dict[str, Any]:
         }
 
 
-def execute_action(page: Page, action: Dict[str, Any], config: Dict[str, Any] = None, task_context: str = None) -> Dict[str, Any]:
+def execute_action(page: Page, action: Dict[str, Any], config: Dict[str, Any] = None, task_context: str = None, skip_auth_check: bool = False) -> Dict[str, Any]:
     """
     Execute a generic action based on action type.
     
@@ -801,6 +1056,7 @@ def execute_action(page: Page, action: Dict[str, Any], config: Dict[str, Any] = 
         action: Action dictionary with 'type' and parameters
         config: Configuration dictionary (for button texts, etc.)
         task_context: Optional task description for context-aware actions
+        skip_auth_check: If True, skip login page check (useful after manual login)
         
     Returns:
         Result dictionary from the action
@@ -812,7 +1068,7 @@ def execute_action(page: Page, action: Dict[str, Any], config: Dict[str, Any] = 
     if action_type == "goto":
         return goto(page, action.get("url", ""))
     elif action_type == "click_by_text":
-        return click_by_text(page, action.get("text", ""), task_context=task_context)
+        return click_by_text(page, action.get("text", ""), task_context=task_context, skip_auth_check=skip_auth_check)
     elif action_type == "wait_for_modal":
         return wait_for_modal(page)
     elif action_type == "fill_inputs":

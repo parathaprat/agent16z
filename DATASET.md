@@ -1,6 +1,6 @@
 # Dataset
 
-This directory contains captured UI states for 3 different tasks across Linear and YouTube.
+This directory contains captured UI states for 4 different tasks across Linear, YouTube, and GitHub.
 
 ## Task 1: Create a Project in Linear
 
@@ -101,6 +101,42 @@ This task demonstrates searching on YouTube. The workflow includes:
 
 ---
 
+## Task 4: Create a Repository on GitHub
+
+**Task:** `"Create a new repository on github named test"`
+
+**Description:**
+This task demonstrates creating a new repository on GitHub. The workflow includes:
+
+- Navigating to GitHub
+- Logging in (if required)
+- Clicking "New" button in sidebar
+- Clicking "Repository" option
+- Filling in the repository name
+- Scrolling to find and clicking "Create repository" button
+
+**Captured States:**
+
+- Initial state
+- After navigation to GitHub
+- After login (if required)
+- After clicking "New" in sidebar
+- After clicking "Repository" option
+- Form filled with repository name
+- After scrolling and clicking "Create repository" button
+- Final state (repository created)
+
+**Key Features Demonstrated:**
+
+- Login detection and handling
+- Sidebar navigation
+- Form filling
+- Scrolling to find buttons below the fold
+- Skipping header buttons (search bars) to find form buttons
+- Context-aware button detection in forms
+
+---
+
 ## Dataset Structure
 
 Each task directory contains:
@@ -125,11 +161,21 @@ Each JSON file contains:
 
 ## Non-URL States Captured
 
-All three tasks demonstrate capturing UI states that don't have unique URLs:
+All four tasks demonstrate capturing UI states that don't have unique URLs:
 
 - **Modals**: Create project modal, create issue modal
-- **Forms**: Project creation form, issue creation form
-- **Dropdowns**: Filter dropdowns (if used)
+- **Forms**: Project creation form, issue creation form, repository creation form
 - **Search Results**: YouTube search results page
+- **Dropdowns**: Navigation menus, option selectors
 
 This demonstrates the system's ability to capture states beyond URL changes, which is a key requirement of the assignment.
+
+## Cross-App Generalizability
+
+The four tasks demonstrate the system works across different types of web applications:
+
+- **Linear**: Project management app (modals, forms, navigation)
+- **YouTube**: Video platform (search, no submit buttons)
+- **GitHub**: Code hosting platform (forms, scrolling, header button filtering)
+
+This shows the system is truly generalizable and not hardcoded to specific websites.
