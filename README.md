@@ -5,6 +5,7 @@ An AI-driven UI workflow capture agent that takes natural language requests and 
 ## Overview
 
 Agent16z is designed to:
+
 - Take natural-language requests like "Create a project in Linear" or "Create a repository on GitHub"
 - Use an LLM to plan generic UI actions dynamically (no hardcoding)
 - Execute those actions in a real browser via Playwright
@@ -34,35 +35,40 @@ The system has been tested and works with 4 different tasks across 3 different w
 ## Setup
 
 1. **Create a virtual environment:**
+
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
 2. **Install dependencies:**
+
    ```bash
    pip install -r requirements.txt
    ```
 
 3. **Install Playwright browsers:**
+
    ```bash
    python -m playwright install
    ```
 
 4. **Set up environment variables:**
+
    ```bash
    cp .env.example .env
    # Edit .env and add your Groq API key:
    # GROQ_API_KEY=your_key_here
    ```
-   
+
    **Getting a Groq API Key (Free!):**
+
    - Go to https://console.groq.com/
    - Sign up for a free account
    - Navigate to API Keys section
    - Create a new API key
    - Copy it to your `.env` file
-   
+
    **Note:** If you don't have an API key, the agent will use heuristic fallback planning for common tasks.
 
 ## Running
@@ -94,6 +100,7 @@ python main.py "Create a new repository on github named test"
 All outputs are saved under `dataset/<task_slug>/` where `<task_slug>` is a slugified version of your task description.
 
 For example, running `python main.py "create a project in Linear"` will create:
+
 ```
 dataset/create-a-project-in-linear/
 ├── 001_initial.png
@@ -106,6 +113,7 @@ dataset/create-a-project-in-linear/
 ```
 
 Each JSON file contains metadata:
+
 - `index`: Sequential state number
 - `url`: Current page URL
 - `timestamp`: ISO UTC timestamp
@@ -159,21 +167,21 @@ Edit `config.yaml` to customize behavior:
 ## Troubleshooting
 
 **Browser doesn't launch:**
+
 - Make sure you ran `python -m playwright install`
 - Check that Chromium is installed correctly
 
 **No actions generated:**
+
 - If using LLM: Check your Groq API key in `.env` (GROQ_API_KEY)
 - The agent will fall back to heuristics if LLM is unavailable
 
 **Login required:**
+
 - The system will detect login pages and pause for manual login
 - Login state is saved in `.browser_context/` for future runs
 
 **Screenshots not captured:**
+
 - Ensure the `dataset/` directory is writable
 - Check that actions are actually changing the DOM
-
-## License
-
-MIT
