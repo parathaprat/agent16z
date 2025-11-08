@@ -37,7 +37,7 @@ def main():
     task = " ".join(sys.argv[1:])
     
     print("=" * 60)
-    print("🤖 Softlight Agent - UI Workflow Capture")
+    print("🤖 Agent16z - UI Workflow Capture")
     print("=" * 60)
     print(f"\n📝 Task: {task}\n")
     

@@ -1,10 +1,10 @@
-# Softlight Agent
+# Agent16z
 
 An AI-driven UI workflow capture agent that takes natural language requests and automatically executes UI actions in a browser, capturing screenshots and metadata of each state change.
 
 ## Overview
 
-Softlight Agent ("Agent B") is designed to:
+Agent16z is designed to:
 - Take natural-language requests like "Create a project in Linear" or "Create a repository on GitHub"
 - Use an LLM to plan generic UI actions dynamically (no hardcoding)
 - Execute those actions in a real browser via Playwright
